@@ -261,7 +261,34 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 
     Track();
 
-    return mCurrentFrame.mTcw.clone();
+    /* Do Pose calculation */
+    if(mState==OK && !mCurrentFrame.mTcw.empty() && mCurrentFrame.mpReferenceKF)
+    {
+
+        vector<KeyFrame*> vpKFs = mpMap->GetAllKeyFrames();
+        sort(vpKFs.begin(),vpKFs.end(),KeyFrame::lId);
+
+        // Transform all keyframes so that the first keyframe is at the origin.
+        // After a loop closure the first keyframe might not be at the origin.
+
+        cv::Mat Two = vpKFs[0]->GetPoseInverse();
+
+        ORB_SLAM2::KeyFrame* pKF = mpReferenceKF;
+
+        cv::Mat Trw = cv::Mat::eye(4,4,CV_32F);
+        while(pKF->isBad())
+        {
+          //  cout << "bad parent" << endl;
+            Trw = Trw*pKF->mTcp;
+            pKF = pKF->GetParent();
+        }
+        Trw = Trw*pKF->GetPose()*Two;
+        cv::Mat Tcr = mlRelativeFramePoses.back();
+        cv::Mat Tcw = Tcr*Trw;
+        return Tcw.clone();
+    }
+    else
+        return mCurrentFrame.mTcw.clone();
 }
 
 void Tracking::Track()
@@ -486,7 +513,7 @@ void Tracking::Track()
     }
 
     // Store frame pose information to retrieve the complete camera trajectory afterwards.
-    if(!mCurrentFrame.mTcw.empty())
+    if(!mCurrentFrame.mTcw.empty() && mCurrentFrame.mpReferenceKF)
     {
         cv::Mat Tcr = mCurrentFrame.mTcw*mCurrentFrame.mpReferenceKF->GetPoseInverse();
         mlRelativeFramePoses.push_back(Tcr);
